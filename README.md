@@ -17,7 +17,7 @@ Rust client library for Basilisk gateway + service bus.
 use rust_client::{BusClient, ForwardRequest};
 use std::collections::HashMap;
 
-# async fn run() -> anyhow::Result<()> {
+async fn run() -> anyhow::Result<()> {
 let client = BusClient::connect("127.0.0.1", 5090, "orders", "orders-1", "instance-token").await?;
 
 client.on_request("order.query", |request, responder| async move {
@@ -35,8 +35,8 @@ let response = client.forward(ForwardRequest {
 }).await?;
 
 println!("{}", response.message_type);
-# Ok(())
-# }
+ Ok(())
+}
 ```
 
 ## End-to-end test
