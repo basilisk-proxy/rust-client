@@ -120,7 +120,7 @@ impl BasiliskClient {
     pub async fn on_event<F, Fut>(&self, topic: impl Into<String>, handler: F) -> ClientResult<()>
     where
         F: Fn(ServiceBusEventEnvelope) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = ()> + Send + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
     {
         self.bus.on_event(topic, handler).await
     }
@@ -135,7 +135,7 @@ impl BasiliskClient {
             + Send
             + Sync
             + 'static,
-        Fut: std::future::Future<Output = ClientResult<()>> + Send + 'static,
+        Fut: Future<Output = ClientResult<()>> + Send + 'static,
     {
         self.bus.on_request(topic, responder).await
     }

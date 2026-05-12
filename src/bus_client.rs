@@ -216,7 +216,7 @@ impl BusClient {
     pub async fn on_event<F, Fut>(&self, topic: impl Into<String>, handler: F) -> ClientResult<()>
     where
         F: Fn(ServiceBusEventEnvelope) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = ()> + Send + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
     {
         let topic = topic.into();
         self.subscribe(vec![topic.clone()]).await?;
@@ -234,7 +234,7 @@ impl BusClient {
     ) -> ClientResult<()>
     where
         F: Fn(ServiceBusRequest, RequestResponder) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = ClientResult<()>> + Send + 'static,
+        Fut: Future<Output = ClientResult<()>> + Send + 'static,
     {
         let topic = topic.into();
         let service_topic = format!("service-{}", self.inner.service_id);
