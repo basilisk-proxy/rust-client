@@ -1,10 +1,23 @@
-use rust_client::{BusClient, ForwardRequest};
+use rust_client::{BasiliskClient, BasiliskClientConfig, ForwardRequest};
 use std::collections::HashMap;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Replace with a real token returned from /registry/register.
-    let client = BusClient::connect("127.0.0.1", 5090, "orders", "orders-1", "replace-me").await?;
+    let client = BasiliskClient::connect(BasiliskClientConfig {
+        gateway_base_url: "http://127.0.0.1:3000".to_string(),
+        bus_host: "127.0.0.1".to_string(),
+        bus_port: 5090,
+        service_id: "orders".to_string(),
+        fingerprint: "orders-v1".to_string(),
+        path_prefixes: vec!["/api/orders".to_string()],
+        scheme: "http".to_string(),
+        host: "127.0.0.1".to_string(),
+        port: 7001,
+        weight: 1,
+        registration_auth_type: "token".to_string(),
+        registration_token: "replace-me".to_string(),
+    })
+    .await?;
 
     client
         .on_request("order.query", |_request, responder| async move {

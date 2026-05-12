@@ -16,6 +16,15 @@ impl GatewayApiClient {
         }
     }
 
+    pub async fn register_instance_auto(
+        &self,
+        request: &RegistrationRequest,
+    ) -> anyhow::Result<RegistrationResponse> {
+        let mut request = request.clone();
+        request.instance.instance_id.clear();
+        self.register_instance(&request).await
+    }
+
     pub async fn register_instance(
         &self,
         request: &RegistrationRequest,
@@ -106,5 +115,7 @@ pub struct RegistrationResponse {
     pub message: String,
     #[serde(rename = "serviceId")]
     pub service_id: String,
+    #[serde(rename = "instanceId")]
+    pub instance_id: String,
     pub token: String,
 }

@@ -1,8 +1,5 @@
 use axum::{Router, extract::State, http::HeaderMap, response::IntoResponse, routing::get};
-use rust_client::{
-    AuthInfo, BusClient, ClientError, ForwardRequest, GatewayApiClient, InstanceInfo,
-    RegistrationRequest,
-};
+use rust_client::{BasiliskClient, BasiliskClientConfig, ClientError, ForwardRequest};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -78,31 +75,6 @@ async fn spawn_gateway(basilisk_dir: &PathBuf, lua_path: &PathBuf) -> Child {
         .expect("spawn basilisk gateway")
 }
 
-fn registration_request(
-    service_id: &str,
-    instance_id: &str,
-    path_prefixes: Vec<String>,
-    host: &str,
-    port: u16,
-) -> RegistrationRequest {
-    RegistrationRequest {
-        service_id: service_id.to_string(),
-        fingerprint: format!("fp-{service_id}"),
-        path_prefixes,
-        instance: InstanceInfo {
-            instance_id: instance_id.to_string(),
-            scheme: "http".to_string(),
-            host: host.to_string(),
-            port,
-            weight: 1,
-        },
-        auth: AuthInfo {
-            auth_type: "token".to_string(),
-            token: "secret-token".to_string(),
-        },
-    }
-}
-
 async fn upstream_handler(
     State(header_seen): State<Arc<AtomicBool>>,
     headers: HeaderMap,
@@ -131,7 +103,7 @@ async fn full_feature_client_e2e_with_gateway() {
     let basilisk_dir = manifest_dir
         .parent()
         .expect("rust-client should have parent directory")
-        .join("basilisk");
+        .join("proxy-server");
 
     let temp = tempdir().expect("create temp dir");
     let lua_path = temp.path().join("basilisk.lua");
@@ -154,49 +126,39 @@ async fn full_feature_client_e2e_with_gateway() {
     let gateway_base = format!("http://127.0.0.1:{http_port}");
     wait_gateway_ready(&gateway_base, &mut gateway).await;
 
-    let gateway_api = GatewayApiClient::new(gateway_base.clone());
-
-    let orders_reg = gateway_api
-        .register_instance(&registration_request(
-            "orders",
-            "orders-1",
-            vec!["/api/orders".to_string()],
-            "127.0.0.1",
-            upstream_port,
-        ))
-        .await
-        .expect("register orders");
-
-    let billing_reg = gateway_api
-        .register_instance(&registration_request(
-            "billing",
-            "billing-1",
-            vec!["/api/billing".to_string()],
-            "127.0.0.1",
-            upstream_port,
-        ))
-        .await
-        .expect("register billing");
-
-    let orders_client = BusClient::connect(
-        "127.0.0.1",
+    let orders_client = BasiliskClient::connect(BasiliskClientConfig {
+        gateway_base_url: gateway_base.clone(),
+        bus_host: "127.0.0.1".to_string(),
         bus_port,
-        "orders",
-        "orders-1",
-        orders_reg.token,
-    )
+        service_id: "orders".to_string(),
+        fingerprint: "fp-orders".to_string(),
+        path_prefixes: vec!["/api/orders".to_string()],
+        scheme: "http".to_string(),
+        host: "127.0.0.1".to_string(),
+        port: upstream_port,
+        weight: 1,
+        registration_auth_type: "token".to_string(),
+        registration_token: "secret-token".to_string(),
+    })
     .await
-    .expect("connect orders bus client");
+    .expect("connect orders client");
 
-    let billing_client = BusClient::connect(
-        "127.0.0.1",
+    let billing_client = BasiliskClient::connect(BasiliskClientConfig {
+        gateway_base_url: gateway_base.clone(),
+        bus_host: "127.0.0.1".to_string(),
         bus_port,
-        "billing",
-        "billing-1",
-        billing_reg.token,
-    )
+        service_id: "billing".to_string(),
+        fingerprint: "fp-billing".to_string(),
+        path_prefixes: vec!["/api/billing".to_string()],
+        scheme: "http".to_string(),
+        host: "127.0.0.1".to_string(),
+        port: upstream_port,
+        weight: 1,
+        registration_auth_type: "token".to_string(),
+        registration_token: "secret-token".to_string(),
+    })
     .await
-    .expect("connect billing bus client");
+    .expect("connect billing client");
 
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<String>();
     orders_client
@@ -209,12 +171,15 @@ async fn full_feature_client_e2e_with_gateway() {
         .await
         .expect("subscribe orders.events");
 
+    let orders_instance_id = orders_client.instance_id.clone();
+
     let (request_seen_tx, request_seen_rx) = oneshot::channel::<()>();
     let request_seen_tx = Arc::new(tokio::sync::Mutex::new(Some(request_seen_tx)));
 
     orders_client
         .on_request("order.query", move |request, responder| {
             let request_seen_tx = Arc::clone(&request_seen_tx);
+            let orders_instance_id = orders_instance_id.clone();
             async move {
                 if request.reply_to().is_none() {
                     return Err(ClientError::MissingField("reply_to"));
@@ -225,7 +190,10 @@ async fn full_feature_client_e2e_with_gateway() {
                 }
 
                 let mut payload = HashMap::new();
-                payload.insert("handledBy".to_string(), serde_json::json!("orders-1"));
+                payload.insert(
+                    "handledBy".to_string(),
+                    serde_json::json!(orders_instance_id),
+                );
                 payload.insert("orderId".to_string(), serde_json::json!("42"));
                 responder.respond("order.query.response", payload).await?;
                 Ok(())
@@ -271,8 +239,11 @@ async fn full_feature_client_e2e_with_gateway() {
             .payload
             .get("handledBy")
             .and_then(|v| v.as_str()),
-        Some("orders-1")
+        Some(orders_client.instance_id.as_str())
     );
+
+    assert!(!orders_client.instance_id.is_empty());
+    assert!(!billing_client.instance_id.is_empty());
 
     timeout(Duration::from_secs(2), request_seen_rx)
         .await
@@ -297,10 +268,8 @@ async fn full_feature_client_e2e_with_gateway() {
         "upstream should observe Lua-forwarded header"
     );
 
-    let _ = gateway_api
-        .deregister_instance("billing", "billing-1")
-        .await;
-    let _ = gateway_api.deregister_instance("orders", "orders-1").await;
+    let _ = billing_client.deregister().await;
+    let _ = orders_client.deregister().await;
 
     let _ = gateway.kill().await;
     upstream_handle.abort();

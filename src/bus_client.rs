@@ -127,13 +127,6 @@ impl BusClient {
                 r#type: protocol_types::CONNECT.to_string(),
                 service_id: Some(service_id),
                 instance_id: Some(instance_id),
-                ..Default::default()
-            })
-            .await?;
-
-        client
-            .send_command(ServiceBusProtocolMessage {
-                r#type: protocol_types::AUTHENTICATE.to_string(),
                 token: Some(token),
                 ..Default::default()
             })

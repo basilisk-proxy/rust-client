@@ -71,13 +71,14 @@ async fn wait_gateway_ready(base_url: &str, gateway_child: &mut Child) {
     panic!("gateway did not become ready at {base_url}");
 }
 
-fn registration_request(service_id: &str, instance_id: &str) -> RegistrationRequest {
+fn registration_request(service_id: &str) -> RegistrationRequest {
     RegistrationRequest {
         service_id: service_id.to_string(),
         fingerprint: format!("fp-{service_id}"),
         path_prefixes: vec![format!("/api/{service_id}")],
         instance: InstanceInfo {
-            instance_id: instance_id.to_string(),
+            // Let registry generate the instance identity so the test matches current behavior.
+            instance_id: String::new(),
             scheme: "http".to_string(),
             host: "127.0.0.1".to_string(),
             port: 65530,
@@ -109,7 +110,7 @@ async fn read_msg(reader: &mut BufReader<OwnedReadHalf>) -> ServiceBusProtocolMe
     serde_json::from_str(&line).expect("parse protocol message")
 }
 
-async fn connect_and_auth(
+async fn connect_authenticated(
     bus_port: u16,
     service_id: &str,
     instance_id: &str,
@@ -127,24 +128,13 @@ async fn connect_and_auth(
             r#type: protocol_types::CONNECT.to_string(),
             service_id: Some(service_id.to_string()),
             instance_id: Some(instance_id.to_string()),
+            token: Some(token.to_string()),
             ..Default::default()
         },
     )
     .await;
     let connect_ack = read_msg(&mut reader).await;
     assert_eq!(connect_ack.r#type, protocol_types::ACK);
-
-    write_msg(
-        &mut write_half,
-        &ServiceBusProtocolMessage {
-            r#type: protocol_types::AUTHENTICATE.to_string(),
-            token: Some(token.to_string()),
-            ..Default::default()
-        },
-    )
-    .await;
-    let auth_ack = read_msg(&mut reader).await;
-    assert_eq!(auth_ack.r#type, protocol_types::ACK);
 
     (reader, write_half)
 }
@@ -158,7 +148,7 @@ async fn tcp_bus_protocol_supports_publish_subscribe_and_forward_request_respons
     let basilisk_dir = manifest_dir
         .parent()
         .expect("rust-client should have parent directory")
-        .join("basilisk");
+        .join("proxy-server");
 
     let temp = tempdir().expect("create temp dir");
     let lua_path = temp.path().join("basilisk.lua");
@@ -171,19 +161,29 @@ async fn tcp_bus_protocol_supports_publish_subscribe_and_forward_request_respons
     let gateway_api = GatewayApiClient::new(gateway_base);
 
     let orders_reg = gateway_api
-        .register_instance(&registration_request("orders", "orders-1"))
+        .register_instance(&registration_request("orders"))
         .await
         .expect("register orders service");
 
     let billing_reg = gateway_api
-        .register_instance(&registration_request("billing", "billing-1"))
+        .register_instance(&registration_request("billing"))
         .await
         .expect("register billing service");
 
-    let (mut orders_reader, mut orders_writer) =
-        connect_and_auth(bus_port, "orders", "orders-1", &orders_reg.token).await;
-    let (mut billing_reader, mut billing_writer) =
-        connect_and_auth(bus_port, "billing", "billing-1", &billing_reg.token).await;
+    let (mut orders_reader, mut orders_writer) = connect_authenticated(
+        bus_port,
+        "orders",
+        &orders_reg.instance_id,
+        &orders_reg.token,
+    )
+    .await;
+    let (mut billing_reader, mut billing_writer) = connect_authenticated(
+        bus_port,
+        "billing",
+        &billing_reg.instance_id,
+        &billing_reg.token,
+    )
+    .await;
 
     write_msg(
         &mut orders_writer,
@@ -273,7 +273,10 @@ async fn tcp_bus_protocol_supports_publish_subscribe_and_forward_request_respons
                 correlation_id: forward_event.correlation_id,
                 causation_id: Some(forward_event.event_id.clone()),
                 payload: HashMap::from([
-                    (String::from("handledBy"), serde_json::json!("orders-1")),
+                    (
+                        String::from("handledBy"),
+                        serde_json::json!(orders_reg.instance_id.clone()),
+                    ),
                     (String::from("orderId"), serde_json::json!("42")),
                 ]),
             }),
@@ -299,13 +302,15 @@ async fn tcp_bus_protocol_supports_publish_subscribe_and_forward_request_respons
             .payload
             .get("handledBy")
             .and_then(|value| value.as_str()),
-        Some("orders-1")
+        Some(orders_reg.instance_id.as_str())
     );
 
     let _ = gateway_api
-        .deregister_instance("billing", "billing-1")
+        .deregister_instance("billing", &billing_reg.instance_id)
         .await;
-    let _ = gateway_api.deregister_instance("orders", "orders-1").await;
+    let _ = gateway_api
+        .deregister_instance("orders", &orders_reg.instance_id)
+        .await;
 
     let _ = gateway.kill().await;
 }
