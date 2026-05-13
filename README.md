@@ -1,6 +1,6 @@
 # rust-client
 
-Rust client library for Basilisk gateway and service bus.
+Rust client library for Milestone Basilisk gateway and service bus.
 
 ## Features
 
@@ -19,39 +19,44 @@ use rust_client::{BasiliskClient, BasiliskClientConfig, ForwardRequest};
 use std::collections::HashMap;
 
 async fn run() -> anyhow::Result<()> {
-let client = BasiliskClient::connect(BasiliskClientConfig {
-    gateway_base_url: "http://127.0.0.1:3000".to_string(),
-    bus_host: "127.0.0.1".to_string(),
-    bus_port: 5090,
-    service_id: "orders".to_string(),
-    fingerprint: "orders-v1".to_string(),
-    path_prefixes: vec!["/api/orders".to_string()],
-    scheme: "http".to_string(),
-    host: "127.0.0.1".to_string(),
-    port: 7001,
-    weight: 1,
-    registration_auth_type: "token".to_string(),
-    registration_token: "instance-token".to_string(),
-}).await?;
+    let client = BasiliskClient::connect(BasiliskClientConfig {
+        gateway_base_url: "http://127.0.0.1:3000".to_string(),
+        bus_host: "127.0.0.1".to_string(),
+        bus_port: 5090,
+        service_id: "orders".to_string(),
+        fingerprint: "orders-v1".to_string(),
+        path_prefixes: vec!["/api/orders".to_string()],
+        scheme: "http".to_string(),
+        host: "127.0.0.1".to_string(),
+        port: 7001,
+        weight: 1,
+        registration_auth_type: "token".to_string(),
+        registration_token: "replace-me".to_string(),
+    })
+    .await?;
 
-println!("instance id: {}", client.instance_id);
+    println!("instance id: {}", client.instance_id);
 
-client.on_request("order.query", |request, responder| async move {
-    let mut payload = HashMap::new();
-    payload.insert("orderId".to_string(), serde_json::json!("42"));
-    responder.respond_ok(payload).await?;
+    client
+        .on_request("order.query", |_request, responder| async move {
+            let mut payload = HashMap::new();
+            payload.insert("orderId".to_string(), serde_json::json!("42"));
+            responder.respond_ok(payload).await?;
+            Ok(())
+        })
+        .await?;
+
+    let response = client
+        .forward(ForwardRequest {
+            target_service_id: "orders".to_string(),
+            message_type: "order.query".to_string(),
+            payload: HashMap::new(),
+            timeout_ms: Some(2_000),
+        })
+        .await?;
+
+    println!("{}", response.message_type);
     Ok(())
-}).await?;
-
-let response = client.forward(ForwardRequest {
-    target_service_id: "orders".to_string(),
-    message_type: "order.query".to_string(),
-    payload: HashMap::new(),
-    timeout_ms: Some(2_000),
-}).await?;
-
-println!("{}", response.message_type);
- Ok(())
 }
 ```
 

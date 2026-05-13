@@ -14,14 +14,13 @@ This document is the contribution guide for humans and automation.
 
 ## 1. Scope
 
-Basilisk is a programmable reverse proxy with:
+`rust-client` is the Rust client library for the **Milestone Basilisk** gateway and service bus. It provides:
 
-- Lua-first configuration (`basilisk.lua`)
-- HTTP service registry endpoints
-- TCP service bus protocol
-- Lua middleware execution on proxy traffic
+- High-level `BasiliskClient` for end-to-end registration, authentication, and messaging
+- `GatewayApiClient` for HTTP registry operations (register, deregister)
+- `BusClient` for the TCP service bus (publish, subscribe, forward, request/response)
 
-Contributions should align with that architecture.
+Contributions should stay within the client's domain: protocol handling, gateway API calls, and the public library surface.
 
 ## 2. Development Setup
 
@@ -38,20 +37,18 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test -- --nocapture
 ```
 
-### Run locally
+### Run the example
 
 ```bash
-cp basilisk.example.lua basilisk.lua
-cargo run -- basilisk.lua
+cargo run --example basic_service_bus
 ```
 
 ## 3. Project Rules
 
-- Use Lua as the configuration source of truth.
-- Keep the startup contract stable: one CLI argument, path to Lua entrypoint.
-- Keep Lua file loading constrained to local files under the entry root.
-- Avoid introducing alternate config systems unless explicitly requested.
-- Keep service bus protocol backward compatible when possible.
+- Keep the public API surface (`BasiliskClient`, `BusClient`, `GatewayApiClient`) backward compatible.
+- Preserve existing `serde(rename = ...)` field names used by the wire protocol and gateway API.
+- Keep service bus protocol framing (newline-delimited JSON) backward compatible when possible.
+- Avoid introducing alternate transport or serialization mechanisms unless explicitly requested.
 
 ## 4. Coding Standards
 
@@ -71,7 +68,7 @@ cargo run -- basilisk.lua
 ## 6. Documentation Requirements
 
 - Update `README.md` when runtime behavior, configuration, API contracts, or flows change.
-- For any new or changed public API, middleware contract, protocol message/field, or Lua primitive, documentation updates are mandatory in the same PR.
+- For any new or changed public API, protocol message/field, or configuration value, documentation updates are mandatory in the same PR.
 - Keep the documentation style consistent with existing project docs (section structure, writing tone, and snippet conventions) unless the PR is explicitly a documentation restructure.
 - Keep examples executable and aligned with the current code.
 - Do not include change logs in `README.md`; use commit/PR history for that.

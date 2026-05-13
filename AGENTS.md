@@ -4,35 +4,33 @@ Operational guidance for human contributors and LLM/code agents working in this 
 
 ## 1. Purpose
 
-Work on Basilisk safely without breaking core contracts:
+Basilisk belongs to **Milestone**.
 
-- Lua-first configuration
-- Reverse proxy fallback behavior
-- Service registry ownership model
-- Service bus protocol compatibility
+Work on the Basilisk Rust client safely without breaking core contracts:
+
+- Gateway API registration and service lifecycle
+- Service bus TCP connection and authentication flow
+- Wire protocol compatibility (newline-delimited JSON)
+- Public API stability for downstream consumers
 
 ## 2. Architecture Map
 
-- `src/main.rs`: process bootstrap and server wiring
-- `src/config.rs`: runtime config data model
-- `src/lua_config.rs`: Lua VM primitives and middleware runtime
-- `src/gateway/routes.rs`: HTTP registry endpoints
-- `src/gateway/proxy.rs`: reverse proxy routing/forwarding
-- `src/registry/mod.rs`: registry storage and path ownership
-- `src/registry/maintenance.rs`: health checks and stale cleanup
-- `src/service_bus/contracts.rs`: wire contracts and protocol types
-- `src/service_bus/connection_manager.rs`: bus connection/subscription state
-- `src/service_bus/server.rs`: TCP protocol handling
-- `tests/*.rs`: public API integration tests
+- `src/lib.rs`: crate root, public re-exports
+- `src/basilisk_client.rs`: high-level `BasiliskClient` entry point
+- `src/gateway_api.rs`: HTTP gateway registration/deregistration
+- `src/bus_client.rs`: TCP service bus connection and message handling
+- `src/protocol.rs`: wire message types and (de)serialization
+- `src/error.rs`: `BasiliskError` and `Result` type alias
+- `tests/tcp_bus_protocol_e2e.rs`: TCP protocol contract integration tests
+- `tests/full_feature_e2e.rs`: end-to-end registration + bus flow tests
 
 ## 3. Non-Negotiable Contracts
 
-1. **Single startup arg**: runtime expects exactly one CLI argument (`basilisk.lua` path).
-2. **Lua source of truth**: runtime config is set through Lua primitives.
-3. **Lua include constraints**: only local `.lua` files under the entry root are allowed.
-4. **Proxy middleware pattern**: use Express-like `req, res, next` semantics.
-5. **Registry route ownership**: path prefixes are exclusive between services.
-6. **Service bus framing**: newline-delimited JSON messages.
+1. **Register before connecting**: a service must register via the gateway API and receive an `instanceId` + `token` before authenticating the bus connection.
+2. **Service bus framing**: all messages are newline-delimited JSON (`\n` terminated).
+3. **Auth on connect**: the first message sent over the bus TCP connection must be an `auth` frame carrying the `instanceId` and `token`.
+4. **Public API field names**: `serde(rename = ...)` annotations on protocol types must not change — external servers depend on them.
+5. **Error transparency**: all fallible operations return `BasiliskError`; do not swallow errors silently.
 
 ## 4. Change Strategy
 
@@ -53,27 +51,29 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test -- --nocapture
 ```
 
-If your change touches routing, Lua primitives, or service bus contracts, add/update integration tests in `tests/`.
+If your change touches the protocol types, bus connection flow, or gateway API, add/update integration tests in `tests/`.
+
+Integration tests require a live Milestone Basilisk server. Set `BASILISK_URL` and `BASILISK_BUS_PORT` environment variables (or accept the defaults) before running.
 
 ## 6. Documentation Policy
 
 Update docs when the behavior changes:
 
-- `README.md` for architecture, configuration, APIs, run behavior
-- rustdoc comments for important public types/functions
+- `README.md` for usage, configuration, API examples, and run behavior
+- rustdoc comments for all public types and functions
 - keep examples copy-paste runnable
-- for any new or changed public API, middleware contract, protocol field, or config primitive, documentation updates are REQUIRED in the same change
+- for any new or changed public type, protocol field, or client behavior, documentation updates are REQUIRED in the same change
 - preserve existing documentation style and structure (headings, tone, and example format) unless a full docs restructuring is explicitly requested
 
 Avoid including release/change-log style narrative in `README.md`.
 
 ## 7. Common Pitfalls
 
-- Reintroducing TOML runtime config paths
-- Using legacy `:param` route syntax in Axum (must use `{param}`)
-- Forgetting to enforce Lua "include root" restrictions
-- Adding middleware behavior that bypasses `next()` semantics without tests
-- Breaking `serde(rename = ...)` field names used by external clients
+- Sending bus messages before a successful `auth` handshake
+- Breaking `serde(rename = ...)` field names relied on by the Basilisk server
+- Forgetting to terminate JSON frames with `\n`
+- Swallowing `io::Error` or parse errors instead of mapping them to `BasiliskError`
+- Adding blocking I/O calls where async is expected
 
 ## 8. Contribution Etiquette
 
