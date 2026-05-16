@@ -2,6 +2,7 @@ use anyhow::Context;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
+/// HTTP client for Basilisk gateway registry APIs.
 #[derive(Clone)]
 pub struct GatewayApiClient {
     base_url: String,
@@ -9,6 +10,7 @@ pub struct GatewayApiClient {
 }
 
 impl GatewayApiClient {
+    /// Creates a new gateway API client.
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_string(),
@@ -16,6 +18,7 @@ impl GatewayApiClient {
         }
     }
 
+    /// Registers a service instance after clearing `instance.instance_id` so the gateway can generate one.
     pub async fn register_instance_auto(
         &self,
         request: &RegistrationRequest,
@@ -25,6 +28,7 @@ impl GatewayApiClient {
         self.register_instance(&request).await
     }
 
+    /// Registers a service instance at `/registry/register`.
     pub async fn register_instance(
         &self,
         request: &RegistrationRequest,
@@ -53,6 +57,7 @@ impl GatewayApiClient {
             .context("failed to parse registry register response")
     }
 
+    /// Deregisters an existing instance by service and instance id.
     pub async fn deregister_instance(
         &self,
         service_id: &str,
@@ -82,40 +87,60 @@ impl GatewayApiClient {
     }
 }
 
+/// Request body for gateway instance registration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrationRequest {
+    /// Logical service identifier.
     #[serde(rename = "serviceId")]
     pub service_id: String,
+    /// Service fingerprint/version marker.
     pub fingerprint: String,
+    /// Path prefixes exposed by this instance.
     #[serde(rename = "pathPrefixes")]
     pub path_prefixes: Vec<String>,
+    /// Network/location metadata for the running instance.
     pub instance: InstanceInfo,
+    /// Registration authentication metadata.
     pub auth: AuthInfo,
 }
 
+/// Instance metadata sent to the gateway registry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstanceInfo {
+    /// Service instance id. Empty string allows server-side generation.
     #[serde(rename = "instanceId")]
     pub instance_id: String,
+    /// Upstream URL scheme.
     pub scheme: String,
+    /// Upstream host.
     pub host: String,
+    /// Upstream port.
     pub port: u16,
+    /// Load-balancing weight.
     pub weight: i32,
 }
 
+/// Registration auth metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthInfo {
+    /// Auth mechanism type (for example `token`).
     #[serde(rename = "type")]
     pub auth_type: String,
+    /// Shared secret/token value.
     pub token: String,
 }
 
+/// Successful response payload for instance registration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistrationResponse {
+    /// Human-readable status message.
     pub message: String,
+    /// Registered service id.
     #[serde(rename = "serviceId")]
     pub service_id: String,
+    /// Registered instance id.
     #[serde(rename = "instanceId")]
     pub instance_id: String,
+    /// Issued token for service-bus authentication.
     pub token: String,
 }

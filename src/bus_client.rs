@@ -23,14 +23,17 @@ const CONNECT_RETRY_MAX_ATTEMPTS: usize = 8;
 const METRICS_TOPIC: &str = "basilisk.metrics.distribution";
 const METRICS_MESSAGE_TYPE: &str = "basilisk.internal";
 
+/// Async event-handler function signature used by `BusClient::on_event`.
 pub type EventHandler =
     Arc<dyn Fn(ServiceBusEventEnvelope) -> BoxFuture<'static, ()> + Send + Sync>;
+/// Async request-handler function signature used by `BusClient::on_request`.
 pub type RequestHandler = Arc<
     dyn Fn(ServiceBusRequest, RequestResponder) -> BoxFuture<'static, ClientResult<()>>
         + Send
         + Sync,
 >;
 
+/// Low-level TCP service-bus client.
 #[derive(Clone)]
 pub struct BusClient {
     inner: Arc<Inner>,
@@ -46,16 +49,20 @@ struct Inner {
 }
 
 #[derive(Debug, Clone)]
+/// Wrapper around an incoming request-style event.
 pub struct ServiceBusRequest {
+    /// Incoming event envelope.
     pub event: ServiceBusEventEnvelope,
 }
 
 impl ServiceBusRequest {
+    /// Returns the reply topic from the payload field ` reply_to `, if present.
     pub fn reply_to(&self) -> Option<&str> {
         self.event.payload.get("reply_to")?.as_str()
     }
 }
 
+/// Helper used by request handlers to publish replies.
 #[derive(Clone)]
 pub struct RequestResponder {
     client: BusClient,
@@ -66,6 +73,7 @@ pub struct RequestResponder {
 }
 
 impl RequestResponder {
+    /// Sends a typed reply event to the request's reply topic.
     pub async fn respond(
         &self,
         message_type: impl Into<String>,
@@ -85,6 +93,7 @@ impl RequestResponder {
         self.client.publish_event(event).await
     }
 
+    /// Sends a reply using the request's original message type.
     pub async fn respond_ok(
         &self,
         payload: HashMap<String, serde_json::Value>,
@@ -95,14 +104,20 @@ impl RequestResponder {
 }
 
 #[derive(Debug, Clone)]
+/// Input payload for `BusClient::forward`.
 pub struct ForwardRequest {
+    /// Target service id that should process the request.
     pub target_service_id: String,
+    /// Message type to execute at the target.
     pub message_type: String,
+    /// Request payload.
     pub payload: HashMap<String, serde_json::Value>,
+    /// Optional timeout in milliseconds.
     pub timeout_ms: Option<u64>,
 }
 
 impl BusClient {
+    /// Opens a TCP connection and authenticates with a `connect` protocol frame.
     pub async fn connect(
         host: &str,
         port: u16,
@@ -126,7 +141,10 @@ impl BusClient {
                         return Err(err.into());
                     }
                     let delay = connect_retry_delay(attempt);
-                    eprintln!("[basilisk][{connection_key}] retry scheduled in {:?}", delay);
+                    eprintln!(
+                        "[basilisk][{connection_key}] retry scheduled in {:?}",
+                        delay
+                    );
                     tokio::time::sleep(delay).await;
                     attempt += 1;
                     continue;
@@ -147,7 +165,9 @@ impl BusClient {
 
             tokio::spawn(read_loop(Arc::clone(&inner), reader));
 
-            eprintln!("[basilisk][{connection_key}] tcp socket established; sending connect handshake");
+            eprintln!(
+                "[basilisk][{connection_key}] tcp socket established; sending connect handshake"
+            );
 
             let client = Self {
                 inner: Arc::clone(&inner),
@@ -169,7 +189,10 @@ impl BusClient {
                     return Err(err);
                 }
                 let delay = connect_retry_delay(attempt);
-                eprintln!("[basilisk][{connection_key}] retry scheduled in {:?}", delay);
+                eprintln!(
+                    "[basilisk][{connection_key}] retry scheduled in {:?}",
+                    delay
+                );
                 tokio::time::sleep(delay).await;
                 attempt += 1;
                 continue;
@@ -182,6 +205,7 @@ impl BusClient {
         }
     }
 
+    /// Subscribes to one or more topics and waits for an `ack`.
     pub async fn subscribe(&self, topics: Vec<String>) -> ClientResult<()> {
         self.send_command(ServiceBusProtocolMessage {
             r#type: protocol_types::SUBSCRIBE.to_string(),
@@ -192,6 +216,7 @@ impl BusClient {
         .map(|_| ())
     }
 
+    /// Unsubscribes from topics without waiting for a response frame.
     pub async fn unsubscribe(&self, topics: Vec<String>) -> ClientResult<()> {
         self.send_fire_and_forget(ServiceBusProtocolMessage {
             r#type: protocol_types::UNSUBSCRIBE.to_string(),
@@ -201,6 +226,7 @@ impl BusClient {
         .await
     }
 
+    /// Publishes a topic + message-type payload and returns subscriber count.
     pub async fn publish(
         &self,
         topic: impl Into<String>,
@@ -222,6 +248,7 @@ impl BusClient {
         self.publish_event(event).await
     }
 
+    /// Publishes a fully formed event envelope and returns the subscriber count.
     pub async fn publish_event(&self, event: ServiceBusEventEnvelope) -> ClientResult<i32> {
         let msg = self
             .send_command(ServiceBusProtocolMessage {
@@ -234,6 +261,7 @@ impl BusClient {
         Ok(msg.subscriber_count.unwrap_or_default())
     }
 
+    /// Sends a forward request and validates a `forward_response` frame.
     pub async fn forward(
         &self,
         request: ForwardRequest,
@@ -260,6 +288,7 @@ impl BusClient {
             .ok_or(ClientError::MissingField("forwardResponse"))
     }
 
+    /// Registers an async event handler for a topic and subscribes automatically.
     pub async fn on_event<F, Fut>(&self, topic: impl Into<String>, handler: F) -> ClientResult<()>
     where
         F: Fn(ServiceBusEventEnvelope) -> Fut + Send + Sync + 'static,
@@ -274,6 +303,7 @@ impl BusClient {
         Ok(())
     }
 
+    /// Registers an async request responder by message type.
     pub async fn on_request<F, Fut>(
         &self,
         topic: impl Into<String>,
@@ -376,7 +406,9 @@ fn start_metrics_publisher(client: BusClient) {
                 .await
             {
                 Ok(subscribers) => {
-                    eprintln!("[basilisk][{connection_key}] metric published subscribers={subscribers}");
+                    eprintln!(
+                        "[basilisk][{connection_key}] metric published subscribers={subscribers}"
+                    );
                 }
                 Err(err) => {
                     eprintln!("[basilisk][{connection_key}] metric publish failed: {err}");
@@ -462,7 +494,7 @@ async fn read_loop(inner: Arc<Inner>, reader: OwnedReadHalf) {
 
         match message.r#type.as_str() {
             protocol_types::EVENT => {
-                if let Some(event) = message.event {
+                if let Some(event) = message.event && event.instance_id == inner.instance_id {
                     dispatch_event(Arc::clone(&inner), event).await;
                 }
             }
