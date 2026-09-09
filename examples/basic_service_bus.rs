@@ -1,4 +1,4 @@
-use rust_client::{BasiliskClient, BasiliskClientConfig, ForwardRequest};
+use basilisk_rust_client::{BasiliskClient, BasiliskClientConfig, ForwardRequest};
 use std::collections::HashMap;
 
 #[tokio::main]

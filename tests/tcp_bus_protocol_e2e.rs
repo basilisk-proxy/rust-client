@@ -1,5 +1,5 @@
 use chrono::Utc;
-use rust_client::{
+use basilisk_rust_client::{
     AuthInfo, GatewayApiClient, InstanceInfo, RegistrationRequest, ServiceBusEventEnvelope,
     ServiceBusProtocolMessage, protocol_types,
 };
@@ -235,7 +235,7 @@ async fn tcp_bus_protocol_supports_publish_subscribe_and_forward_request_respons
         &mut billing_writer,
         &ServiceBusProtocolMessage {
             r#type: protocol_types::FORWARD.to_string(),
-            forward_request: Some(rust_client::protocol::ServiceBusForwardRequest {
+            forward_request: Some(basilisk_rust_client::protocol::ServiceBusForwardRequest {
                 target_service_id: "orders".to_string(),
                 message_type: "order.query".to_string(),
                 payload: HashMap::from([(String::from("orderId"), serde_json::json!("42"))]),

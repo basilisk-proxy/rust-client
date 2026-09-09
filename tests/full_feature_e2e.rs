@@ -1,5 +1,5 @@
 use axum::{Router, extract::State, http::HeaderMap, response::IntoResponse, routing::get};
-use rust_client::{BasiliskClient, BasiliskClientConfig, ClientError, ForwardRequest};
+use  basilisk_rust_client::{BasiliskClient, BasiliskClientConfig, ClientError, ForwardRequest};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
