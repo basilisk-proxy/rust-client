@@ -1,8 +1,9 @@
-use basilisk_rust_client::{BasiliskClient, BasiliskClientConfig, ForwardRequest};
+use basilisk_rust_client::{BasiliskClient, BasiliskClientConfig, ForwardRequest, init_tracing};
 use std::collections::HashMap;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    init_tracing();
     let client = BasiliskClient::connect(BasiliskClientConfig {
         gateway_base_url: "http://127.0.0.1:3000".to_string(),
         bus_host: "127.0.0.1".to_string(),
@@ -37,6 +38,6 @@ async fn main() -> anyhow::Result<()> {
         })
         .await?;
 
-    println!("Forward response type: {}", response.message_type);
+    tracing::info!(message_type = %response.message_type, "Forward response received");
     Ok(())
 }

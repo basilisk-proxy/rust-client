@@ -134,10 +134,11 @@ All fallible bus operations return `ClientResult<T>` and preserve protocol/trans
 ## Quick usage
 
 ```rust
-use rust_client::{BasiliskClient, BasiliskClientConfig, ForwardRequest};
+use rust_client::{BasiliskClient, BasiliskClientConfig, ForwardRequest, init_tracing};
 use std::collections::HashMap;
 
 async fn run() -> anyhow::Result<()> {
+    init_tracing();
     let client = BasiliskClient::connect(BasiliskClientConfig {
         gateway_base_url: "http://127.0.0.1:3000".to_string(),
         bus_host: "127.0.0.1".to_string(),
@@ -154,7 +155,7 @@ async fn run() -> anyhow::Result<()> {
     })
     .await?;
 
-    println!("instance id: {}", client.instance_id);
+    tracing::info!(instance_id = %client.instance_id, "Connected to Basilisk");
 
     client
         .on_request("order.query", |_request, responder| async move {
@@ -174,7 +175,7 @@ async fn run() -> anyhow::Result<()> {
         })
         .await?;
 
-    println!("{}", response.message_type);
+    tracing::info!(message_type = %response.message_type, "Forward response received");
     Ok(())
 }
 ```
@@ -183,6 +184,17 @@ async fn run() -> anyhow::Result<()> {
 the TCP service bus. The top-level `connect` flow automatically registers the instance,
 accepts the generated instance ID returned by the registry, and then opens the bus
 connection using the issued token.
+
+## Logging
+
+Call `init_tracing()` once during application startup to install Basilisk's
+console subscriber. It reads [`RUST_LOG`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html)
+for log filtering and defaults to `INFO` when the variable is absent. If your
+application has already installed a `tracing` subscriber, do not call it.
+
+```bash
+RUST_LOG=debug cargo run --example basic_service_bus
+```
 
 ## Notes on low-level clients
 

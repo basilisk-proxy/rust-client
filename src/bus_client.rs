@@ -13,6 +13,7 @@ use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::{Mutex, RwLock, oneshot};
 use tokio::time::{Duration, timeout};
+use tracing::{debug, error, info, warn};
 
 const COMMAND_RESPONSE_TIMEOUT: Duration = Duration::from_secs(10);
 const METRICS_INTERVAL: Duration = Duration::from_secs(20);
@@ -135,16 +136,13 @@ impl BusClient {
             let stream = match TcpStream::connect((host, port)).await {
                 Ok(stream) => stream,
                 Err(err) => {
-                    eprintln!("[basilisk][{connection_key}] tcp connect failed: {err}");
+                    warn!(%connection_key, %err, "TCP connection failed");
                     if attempt >= CONNECT_RETRY_MAX_ATTEMPTS - 1 {
-                        eprintln!("[basilisk][{connection_key}] giving up after retries");
+                        error!(%connection_key, "Giving up after connection retries");
                         return Err(err.into());
                     }
                     let delay = connect_retry_delay(attempt);
-                    eprintln!(
-                        "[basilisk][{connection_key}] retry scheduled in {:?}",
-                        delay
-                    );
+                    info!(%connection_key, ?delay, "Connection retry scheduled");
                     tokio::time::sleep(delay).await;
                     attempt += 1;
                     continue;
@@ -165,9 +163,7 @@ impl BusClient {
 
             tokio::spawn(read_loop(Arc::clone(&inner), reader));
 
-            eprintln!(
-                "[basilisk][{connection_key}] tcp socket established; sending connect handshake"
-            );
+            info!(%connection_key, "TCP socket established; sending connect handshake");
 
             let client = Self {
                 inner: Arc::clone(&inner),
@@ -184,21 +180,18 @@ impl BusClient {
                 .await;
 
             if let Err(err) = connect_result {
-                eprintln!("[basilisk][{connection_key}] connect handshake failed: {err}");
+                warn!(%connection_key, %err, "Connect handshake failed");
                 if attempt >= CONNECT_RETRY_MAX_ATTEMPTS - 1 {
                     return Err(err);
                 }
                 let delay = connect_retry_delay(attempt);
-                eprintln!(
-                    "[basilisk][{connection_key}] retry scheduled in {:?}",
-                    delay
-                );
+                info!(%connection_key, ?delay, "Connection retry scheduled");
                 tokio::time::sleep(delay).await;
                 attempt += 1;
                 continue;
             }
 
-            eprintln!("[basilisk][{connection_key}] authenticated and connected");
+            info!(%connection_key, "Authenticated and connected");
 
             start_metrics_publisher(client.clone());
             return Ok(client);
@@ -392,7 +385,7 @@ fn start_metrics_publisher(client: BusClient) {
         loop {
             ticker.tick().await;
             let Some(inner) = weak_inner.upgrade() else {
-                eprintln!("[basilisk] metrics task stopping because client was dropped");
+                debug!("Metrics task stopping because client was dropped");
                 break;
             };
 
@@ -406,12 +399,10 @@ fn start_metrics_publisher(client: BusClient) {
                 .await
             {
                 Ok(subscribers) => {
-                    eprintln!(
-                        "[basilisk][{connection_key}] metric published subscribers={subscribers}"
-                    );
+                    debug!(%connection_key, subscribers, "Metric published");
                 }
                 Err(err) => {
-                    eprintln!("[basilisk][{connection_key}] metric publish failed: {err}");
+                    warn!(%connection_key, %err, "Metric publish failed");
                 }
             }
         }
@@ -468,33 +459,35 @@ async fn read_loop(inner: Arc<Inner>, reader: OwnedReadHalf) {
     let mut line = String::new();
     let connection_key = format!("{}:{}", inner.service_id, inner.instance_id);
 
-    eprintln!("[basilisk][{connection_key}] read loop started");
+    debug!(%connection_key, "Read loop started");
 
     loop {
         line.clear();
         let bytes = match reader.read_line(&mut line).await {
             Ok(size) => size,
             Err(err) => {
-                eprintln!("[basilisk][{connection_key}] read error: {err}");
+                warn!(%connection_key, %err, "Read error");
                 break;
             }
         };
         if bytes == 0 {
-            eprintln!("[basilisk][{connection_key}] socket closed by peer");
+            info!(%connection_key, "Socket closed by peer");
             break;
         }
 
         let message: ServiceBusProtocolMessage = match serde_json::from_str(&line) {
             Ok(msg) => msg,
             Err(err) => {
-                eprintln!("[basilisk][{connection_key}] failed to parse message: {err}");
+                warn!(%connection_key, %err, "Failed to parse message");
                 continue;
             }
         };
 
         match message.r#type.as_str() {
             protocol_types::EVENT => {
-                if let Some(event) = message.event && event.instance_id == inner.instance_id {
+                if let Some(event) = message.event
+                    && event.instance_id == inner.instance_id
+                {
                     dispatch_event(Arc::clone(&inner), event).await;
                 }
             }
@@ -511,7 +504,7 @@ async fn read_loop(inner: Arc<Inner>, reader: OwnedReadHalf) {
         }
     }
 
-    eprintln!("[basilisk][{connection_key}] read loop stopped");
+    debug!(%connection_key, "Read loop stopped");
 }
 
 async fn dispatch_event(inner: Arc<Inner>, event: ServiceBusEventEnvelope) {
